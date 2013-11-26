@@ -9,6 +9,8 @@
 #import "TITokenField.h"
 #import <QuartzCore/QuartzCore.h>
 
+const NSUInteger kResultsRowHeight = 44;
+
 @interface TITokenField ()
 @property (nonatomic, assign) BOOL forcePickSearchResult;
 @end
@@ -35,8 +37,6 @@
 @synthesize showAlreadyTokenized = _showAlreadyTokenized;
 @synthesize searchSubtitles = _searchSubtitles;
 @synthesize forcePickSearchResult = _forcePickSearchResult;
-@synthesize shouldSortResults = _shouldSortResults;
-@synthesize shouldSearchInBackground = _shouldSearchInBackground;
 @synthesize tokenField = _tokenField;
 @synthesize resultsTable = _resultsTable;
 @synthesize contentView = _contentView;
@@ -71,8 +71,6 @@
 	_showAlreadyTokenized = NO;
     _searchSubtitles = YES;
     _forcePickSearchResult = NO;
-  _shouldSortResults = YES;
-  _shouldSearchInBackground = NO;
 	_resultsArray = [NSMutableArray array];
 	
 	_tokenField = [[TITokenField alloc] initWithFrame:CGRectMake(0, 0, self.bounds.size.width, 42)];
@@ -167,6 +165,7 @@
 	
 	CGFloat relativeFieldHeight = CGRectGetMaxY(_tokenField.frame) - self.contentOffset.y;
 	CGFloat newHeight = self.bounds.size.height - relativeFieldHeight;
+    newHeight = MIN(newHeight, [_resultsArray count]* kResultsRowHeight);
 	if (newHeight > -1) [_resultsTable setFrame:((CGRect){_resultsTable.frame.origin, {_resultsTable.bounds.size.width, newHeight}})];
 }
 
@@ -193,7 +192,7 @@
 		return [_tokenField.delegate tokenField:_tokenField resultsTableView:tableView heightForRowAtIndexPath:indexPath];
 	}
 	
-	return 44;
+	return kResultsRowHeight;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -244,6 +243,7 @@
 
 - (void)tokenFieldDidEndEditing:(TITokenField *)field {
 	[self tokenFieldDidBeginEditing:field];
+    [self setSearchResultsVisible:NO];
 }
 
 - (void)tokenFieldTextDidChange:(TITokenField *)field {
@@ -324,55 +324,39 @@
 	searchString = [searchString stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 	
 	if (searchString.length || _forcePickSearchResult){
-    if (_shouldSearchInBackground) {
-      [self performSelectorInBackground:@selector(performSearch:) withObject:searchString];
-    } else {
-      [self performSearch:searchString];
-    }
-	}
-}
-
-- (void) performSearch:(NSString *)searchString {
-  NSMutableArray * resultsToAdd = [[NSMutableArray alloc] init];
-  [_sourceArray enumerateObjectsUsingBlock:^(id sourceObject, NSUInteger idx, BOOL *stop){
-
-    NSString * query = [self searchResultStringForRepresentedObject:sourceObject];
-    NSString * querySubtitle = [self searchResultSubtitleForRepresentedObject:sourceObject];
-    if (!querySubtitle || !_searchSubtitles) querySubtitle = @"";
-    
-    if ([query rangeOfString:searchString options:NSCaseInsensitiveSearch].location != NSNotFound ||
+		[_sourceArray enumerateObjectsUsingBlock:^(id sourceObject, NSUInteger idx, BOOL *stop){
+			
+			NSString * query = [self searchResultStringForRepresentedObject:sourceObject];
+			NSString * querySubtitle = [self searchResultSubtitleForRepresentedObject:sourceObject];
+			if (!querySubtitle || !_searchSubtitles) querySubtitle = @"";
+			
+			if ([query rangeOfString:searchString options:NSCaseInsensitiveSearch].location != NSNotFound ||
 				[querySubtitle rangeOfString:searchString options:NSCaseInsensitiveSearch].location != NSNotFound ||
-        (_forcePickSearchResult && searchString.length == 0)){
-
-      __block BOOL shouldAdd = ![resultsToAdd containsObject:sourceObject];
-      if (shouldAdd && !_showAlreadyTokenized){
-
-        [_tokenField.tokens enumerateObjectsUsingBlock:^(TIToken * token, NSUInteger idx, BOOL *secondStop){
-          if ([token.representedObject isEqual:sourceObject]){
-            shouldAdd = NO;
-            *secondStop = YES;
-          }
+                (_forcePickSearchResult && searchString.length == 0)){
+				
+				__block BOOL shouldAdd = ![_resultsArray containsObject:sourceObject];
+				if (shouldAdd && !_showAlreadyTokenized){
+					
+					[_tokenField.tokens enumerateObjectsUsingBlock:^(TIToken * token, NSUInteger idx, BOOL *secondStop){
+						if ([token.representedObject isEqual:sourceObject]){
+							shouldAdd = NO;
+							*secondStop = YES;
+						}
+					}];
+				}
+				
+				if (shouldAdd) [_resultsArray addObject:sourceObject];
+			}
+		}];
+	}
+    
+    if (_resultsArray.count > 0) {
+        [_resultsArray sortUsingComparator:^NSComparisonResult(id obj1, id obj2) {
+            return [[self searchResultStringForRepresentedObject:obj1] localizedCaseInsensitiveCompare:[self searchResultStringForRepresentedObject:obj2]];
         }];
-      }
-
-      if (shouldAdd) [resultsToAdd addObject:sourceObject];
+        [_resultsTable reloadData];
     }
-  }];
-
-  [_resultsArray addObjectsFromArray:resultsToAdd];
-  if (_resultsArray.count > 0) {
-    if (_shouldSortResults) {
-      [_resultsArray sortUsingComparator:^NSComparisonResult(id obj1, id obj2) {
-        return [[self searchResultStringForRepresentedObject:obj1] localizedCaseInsensitiveCompare:[self searchResultStringForRepresentedObject:obj2]];
-      }];
-    }
-    [self performSelectorOnMainThread:@selector(reloadResultsTable) withObject:nil waitUntilDone:YES];
-  }
-}
-
--(void) reloadResultsTable {
-  [_resultsTable setHidden:NO];
-  [_resultsTable reloadData];
+    [self layoutSubviews]; // Table view may have changed height from fewer results
 }
 
 - (void)presentpopoverAtTokenFieldCaretAnimated:(BOOL)animated {
@@ -571,9 +555,6 @@ NSString * const kTextHidden = @"\u200D"; // Zero-Width Joiner
 	}
 	
 	[self setResultsModeEnabled:NO];
-	if (_tokens.count < 1 && self.forcePickSearchResult) {
-		[self becomeFirstResponder];
-	}
 }
 
 - (void)didChangeText {
