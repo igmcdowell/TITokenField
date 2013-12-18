@@ -360,10 +360,11 @@ const NSUInteger kResultsRowHeight = 44;
 }
 
 - (void)presentpopoverAtTokenFieldCaretAnimated:(BOOL)animated {
-	
     UITextPosition * position = [_tokenField positionFromPosition:_tokenField.beginningOfDocument offset:2];
-	
-	[_popoverController presentPopoverFromRect:[_tokenField caretRectForPosition:position] inView:_tokenField
+    CGRect theRect= [_tokenField caretRectForPosition:position];
+    theRect.origin.x = theRect.origin.x + _tokenField.textInputView.superview.frame.origin.x + 5;
+    theRect.origin.y = theRect.origin.y + _tokenField.textInputView.superview.frame.origin.y + 5;
+	[_popoverController presentPopoverFromRect:theRect inView:_tokenField
 					 permittedArrowDirections:UIPopoverArrowDirectionUp animated:animated];
 }
 
